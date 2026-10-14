@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\CalcSharp.Core\CalcSharp.Core.csproj" />
+    <None Include="GoldenData\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

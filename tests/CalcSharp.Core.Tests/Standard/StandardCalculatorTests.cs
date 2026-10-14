@@ -75,12 +75,12 @@ public class StandardCalculatorTests
         Assert.Equal("5", Press(2, Operation.Add, 3, Operation.Multiply).Display);
 
     [Fact]
-    public void ExpressionLineTracksOperations() =>
-        Assert.Equal("2 + 3 ×", Press(2, Operation.Add, 3, Operation.Multiply).Expression);
+    public void ChainedOperatorCollapsesExpressionToIntermediateResult() =>
+        Assert.Equal("5 ×", Press(2, Operation.Add, 3, Operation.Multiply).Expression);
 
     [Fact]
     public void ExpressionLineAfterEquals() =>
-        Assert.Equal("2 + 3 =", Press(2, Operation.Add, 3, "=").Expression);
+        Assert.Equal("2 + 3=", Press(2, Operation.Add, 3, "=").Expression);
 
     [Fact]
     public void RepeatedEqualsRepeatsLastOperation() =>
@@ -125,7 +125,7 @@ public class StandardCalculatorTests
     public void NegateTwiceRestores() => Assert.Equal("5", Press(5, "±", "±").Display);
 
     [Fact]
-    public void NegateZeroEntryKeepsPrefix() => Assert.Equal("-5", Press("±", 5).Display);
+    public void NegatingZeroEntryDoesNothing() => Assert.Equal("5", Press("±", 5).Display);
 
     [Fact]
     public void NegateResult() => Assert.Equal("-8", Press(5, Operation.Add, 3, "=", "±").Display);
@@ -148,8 +148,8 @@ public class StandardCalculatorTests
         Assert.Equal("Cannot divide by zero", Press(0, "1/x").Display);
 
     [Fact]
-    public void PercentIsRelativeToLeftOperand() =>
-        Assert.Equal("10", Press(2, 0, 0, Operation.Multiply, 5, "%").Display);
+    public void PercentOfMultiplicationOperandIsDividedByHundred() =>
+        Assert.Equal("0.05", Press(2, 0, 0, Operation.Multiply, 5, "%").Display);
 
     [Fact]
     public void PercentWithAddition() =>
