@@ -1,0 +1,53 @@
+<UserControl x:Class="CalcSharp.App.Views.DateCalculationView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <StackPanel Margin="16,12">
+        <TextBlock Text="Select the date calculation you want" FontSize="14" Foreground="#C5C5C5" Margin="0,0,0,6"/>
+        <ComboBox x:Name="ModeCombo" SelectedIndex="0" Margin="0,0,0,16" SelectionChanged="OnChanged">
+            <ComboBoxItem Content="Difference between dates"/>
+            <ComboBoxItem Content="Add or subtract days"/>
+        </ComboBox>
+
+        <StackPanel x:Name="DiffPanel">
+            <TextBlock Text="From" Margin="0,0,0,4"/>
+            <DatePicker x:Name="DiffFrom" Margin="0,0,0,12" SelectedDateChanged="OnChanged"/>
+            <TextBlock Text="To" Margin="0,0,0,4"/>
+            <DatePicker x:Name="DiffTo" Margin="0,0,0,16" SelectedDateChanged="OnChanged"/>
+            <TextBlock Text="Difference" FontSize="14" Foreground="#C5C5C5"/>
+            <TextBlock x:Name="DiffResult" FontSize="32" FontWeight="SemiBold" TextWrapping="Wrap"/>
+            <TextBlock x:Name="DiffDays" FontSize="14" Foreground="#C5C5C5" Margin="0,4,0,0"/>
+        </StackPanel>
+
+        <StackPanel x:Name="AddPanel" Visibility="Collapsed">
+            <TextBlock Text="From" Margin="0,0,0,4"/>
+            <DatePicker x:Name="AddFrom" Margin="0,0,0,12" SelectedDateChanged="OnChanged"/>
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                <RadioButton x:Name="AddOption" Content="Add" IsChecked="True" Margin="0,0,24,0" Checked="OnChanged"/>
+                <RadioButton x:Name="SubtractOption" Content="Subtract" Checked="OnChanged"/>
+            </StackPanel>
+            <Grid Margin="0,0,0,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="8"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="8"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="Years" Margin="0,0,0,4"/>
+                    <ComboBox x:Name="YearsCombo" SelectionChanged="OnChanged"/>
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                    <TextBlock Text="Months" Margin="0,0,0,4"/>
+                    <ComboBox x:Name="MonthsCombo" SelectionChanged="OnChanged"/>
+                </StackPanel>
+                <StackPanel Grid.Column="4">
+                    <TextBlock Text="Days" Margin="0,0,0,4"/>
+                    <ComboBox x:Name="DaysCombo" SelectionChanged="OnChanged"/>
+                </StackPanel>
+            </Grid>
+            <TextBlock Text="Date" FontSize="14" Foreground="#C5C5C5"/>
+            <TextBlock x:Name="DateResult" FontSize="24" FontWeight="SemiBold" TextWrapping="Wrap"/>
+        </StackPanel>
+    </StackPanel>
+</UserControl>
