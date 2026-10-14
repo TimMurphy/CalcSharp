@@ -38,4 +38,4 @@ dotnet run --project src/CalcSharp.App
 
 ## Ground rules
 
-No `calc.exe` source code was read. See [GLOSSARY.md](GLOSSARY.md) for the web addresses consulted and why.
+No one else's `calc.exe` source code is read. Code decompiled from `calc.exe` by this project itself may be read. See [GLOSSARY.md](GLOSSARY.md) for the web addresses consulted and why.

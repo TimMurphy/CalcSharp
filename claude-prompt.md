@@ -15,10 +15,10 @@ Your job is to create an **exact working replica** of Windows' Calculator in C#.
 
 ## Rules
 
-- You may use the internet, but you **MUST NOT** read any source code directly related to `calc.exe`.
+- You may use the internet, but you **MUST NOT** read anyone else's source code related to `calc.exe`.
+- You **MAY** decompile `calc.exe` yourself and read the code you decompiled.
 - You **MUST** record every web address you read, and the reason for reading it, in `GLOSSARY.md`.
 - Do not copy any existing prompt or implementation of this task.
-- You may decompile `calc.exe`.
 
 ## Definition of done
 
