@@ -70,4 +70,12 @@ public class BigNumTests
         Assert.True(BigNum.Parse("-3") < BigNum.Parse("2"));
         Assert.True(BigNum.Parse("100") > BigNum.Parse("99.99"));
     }
+
+    [Fact]
+    public void GammaOfFourAndAHalf() =>
+        Assert.Equal("11.631728396567448929144224109426", Show(BigNum.Gamma(BigNum.Parse("4.5"))));
+
+    [Fact]
+    public void GammaOfFiveIsTwentyFour() =>
+        Assert.Equal("24", Show(BigNum.Gamma(BigNum.FromInt(5))));
 }

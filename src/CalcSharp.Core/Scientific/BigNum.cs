@@ -468,6 +468,47 @@ public readonly struct BigNum : IComparable<BigNum>, IEquatable<BigNum>
         return new BigNum(r, 0).Round(Precision + Guard);
     }
 
+    // Bernoulli numbers B2, B4, ..., B30 as numerator/denominator pairs.
+    private static readonly (long Num, long Den)[] Bernoulli =
+    [
+        (1, 6), (-1, 30), (1, 42), (-1, 30), (5, 66), (-691, 2730), (7, 6), (-3617, 510),
+        (43867, 798), (-174611, 330), (854513, 138), (-236364091, 2730), (8553103, 6),
+        (-23749461029, 870), (8615841276005, 14322),
+    ];
+
+    /// <summary>The gamma function for positive real arguments (Stirling series with a shift).</summary>
+    public static BigNum Gamma(BigNum x)
+    {
+        if (x.Sign <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(x));
+        }
+
+        // Shift the argument up so the asymptotic series converges quickly.
+        var y = x;
+        var product = One;
+        var threshold = FromInt(60);
+        while (y < threshold)
+        {
+            product *= y;
+            y += One;
+        }
+
+        var lnY = Ln(y);
+        var sum = ((y - (One / Two)) * lnY) - y + (Ln(Pi * Two) / Two);
+        var yPow = y;                       // y^(2k-1)
+        var ySquared = y * y;
+        for (var k = 1; k <= Bernoulli.Length; k++)
+        {
+            var (num, den) = Bernoulli[k - 1];
+            var coefficient = FromInt(num) / (FromInt(den) * FromInt(2 * k) * FromInt((2 * k) - 1));
+            sum += coefficient / yPow;
+            yPow *= ySquared;
+        }
+
+        return Exp(sum) / product;
+    }
+
     public static BigNum Sin(BigNum x)
     {
         var r = ReduceRadians(x);

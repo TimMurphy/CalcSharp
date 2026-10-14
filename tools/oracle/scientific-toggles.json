@@ -1,0 +1,42 @@
+{
+  "nav": "Scientific",
+  "reset": ["clearButton"],
+  "reads": ["CalculatorResults", "CalculatorExpression"],
+  "strip": ["^Display is ", "^Expression is ?"],
+  "untoggle": ["shiftButton", "ftoeButton"],
+  "keys": {
+    "0": ["num0Button"], "1": ["num1Button"], "2": ["num2Button"], "3": ["num3Button"], "4": ["num4Button"],
+    "5": ["num5Button"], "6": ["num6Button"], "7": ["num7Button"], "8": ["num8Button"], "9": ["num9Button"],
+    ".": ["decimalSeparatorButton"], "+": ["plusButton"], "-": ["minusButton"], "*": ["multiplyButton"],
+    "/": ["divideButton"], "=": ["equalButton"], "n": ["negateButton"], "b": ["backSpaceButton"],
+    "c": ["clearButton"], "s": ["squareRootButton"], "q": ["xpower2Button"], "r": ["invertButton"],
+    "a": ["absButton"], "x": ["expButton"], "m": ["modButton"], "(": ["openParenthesisButton"],
+    ")": ["closeParenthesisButton"], "!": ["factorialButton"], "p": ["piButton"], "v": ["eulerButton"],
+    "^": ["powerButton"], "w": ["powerOf10Button"], "g": ["logBase10Button"], "l": ["logBaseEButton"],
+    "u": ["shiftButton"], "z": ["degButton"], "f": ["ftoeButton"],
+    "i": ["trigButton", "sinButton"], "o": ["trigButton", "cosButton"], "t": ["trigButton", "tanButton"],
+    "k": ["trigButton", "secButton"], "j": ["trigButton", "cscButton"], "y": ["trigButton", "cotButton"],
+    "[": ["trigButton", "trigShiftButton", "invsinButton"], "]": ["trigButton", "trigShiftButton", "invcosButton"],
+    "{": ["trigButton", "trigShiftButton", "invtanButton"], "%": ["trigButton", "trigShiftButton", "invsecButton"], "`": ["trigButton", "trigShiftButton", "invcscButton"],
+    "}": ["trigButton", "hypShiftButton", "sinhButton"], "<": ["trigButton", "hypShiftButton", "coshButton"],
+    ">": ["trigButton", "hypShiftButton", "tanhButton"], "'": ["trigButton", "hypShiftButton", "sechButton"], "_": ["trigButton", "hypShiftButton", "cschButton"],
+    "d": ["funcButton", "dmsButton"], "e": ["funcButton", "degreesButton"],
+    "#": ["xpower3Button"], "$": ["cubeRootButton"], "&": ["ySquareRootButton"], "@": ["twoPowerXButton"], ":": ["logBaseY"], ";": ["powerOfEButton"],
+    "|": ["funcButton", "floorButton"], "~": ["funcButton", "ceilButton"]
+  },
+  "alphabet": "0123456789.+-*/=nbcsqraxm()!pv^wglu",
+  "probes": [
+    "5uq", "5us", "5uw", "5ul", "5uqu", "8u^3=", "8ug2=", "5uuq", "5u!", "5ur", "5ua", "2u^", "uw5", "3uq+2=",
+    "5f", "123f", "0.5f", "1/3=f", "100000f", "12345678901234567890f", "5ff", "pf", "f5", "5f+3=",
+    "30i", "30o", "30t", "45i", "90i", "90o", "90t", "180i", "180o", "270i", "360i", "0t", "60k", "30j", "45y", "90y",
+    "z1i", "z1o", "z1t", "zp/2i", "zp/2o", "zp/6i", "zzz30i", "zz100i", "zz50i", "zz200o",
+    "0.5[", "1[", "2[", "0.5]", "1]", "1{", "0{", "1}", "1<", "1>", "0}",
+    "30d", "30.5d", "1.5e", "1.3e", "2.7|", "2.2~", "5n|", "5n~",
+    "1/3", "1/3=", "1/30000=", "1/300000000=", "1/1000000000000000000000000000000000=", "1/10000000000000000000000000000000000=",
+    "2^100=", "2^200=", "10^30", "1w", "31w", "32w", "33w", "20w", "100w", "9999w", "10000w", "99999w",
+    "10w1/=", "0.00001", "0.00001*1=", "1/3*0.000000001=", "1/3*0.00000000000000000000000000001=", "1/3*0.0000000000000000000000000000000001=",
+    "123456789012345678901234567890123", "1234567890123456789012345678901234567890", "0.1234567890123456789012345678901234",
+    "100!", "170!", "171!", "1000!", "3248!", "3249!", "0.5!", "3.5!", "n1!", "2.5!",
+    "2s", "3s", "5q", "1.5q", "5u#u", "27u$u", "8u&3=u", "5u@u", "1u;u", "8u:2=u", "0.5u;u", "2.5u#u", "u#u", "10u:10=u"
+  ]
+}

@@ -107,8 +107,11 @@ public sealed class ScientificCalculator
         set
         {
             _fixedExponent = value;
-            if (!_entering && !_error)
+            if (!_error)
             {
+                // A number being typed is committed and redisplayed in the new notation.
+                _value = CurrentValue();
+                _entering = false;
                 Display = Format(_value, true, _fixedExponent);
             }
         }
@@ -161,7 +164,9 @@ public sealed class ScientificCalculator
             return;
         }
 
-        if (text.Count(char.IsDigit) >= MaxDigits)
+        // A lone leading "0" before the decimal point does not count towards the digit limit.
+        var counted = text.Count(char.IsDigit) - (text.TrimStart('-').StartsWith("0.") ? 1 : 0);
+        if (counted >= MaxDigits)
         {
             return;
         }
@@ -198,7 +203,18 @@ public sealed class ScientificCalculator
             Clear();
         }
 
-        if (!_entering || _justEvaluated || _entry.ToString().Contains('e') || !BeginEntry())
+        if (_justEvaluated)
+        {
+            // After a result the exp key starts over with a cleared display.
+            ResetExpression();
+            _entry.Clear().Append('0');
+            _entering = true;
+            _value = BigNum.Zero;
+            Display = "0";
+            return;
+        }
+
+        if (!_entering || _entry.ToString().Contains('e') || !BeginEntry())
         {
             return;
         }
@@ -543,11 +559,11 @@ public sealed class ScientificCalculator
 
     public void Square() => Unary("square (", v => v * v);
 
-    public void Cube() => Unary("cube (", v => v * v * v);
+    public void Cube() => Unary("cube(", v => v * v * v);
 
     public void SquareRoot() => Unary("√(", v => v.Sign < 0 ? throw new CalcFailure(Invalid) : BigNum.Sqrt(v));
 
-    public void CubeRoot() => Unary("cuberoot (", CubeRootOf);
+    public void CubeRoot() => Unary("Cube root (", CubeRootOf);
 
     public void TenPower() => Unary("10^(", v => BigNum.Pow(BigNum.Ten, v));
 
@@ -570,10 +586,14 @@ public sealed class ScientificCalculator
     public void E() => Constant(BigNum.Exp(BigNum.One));
 
     /// <summary>Converts decimal degrees to degrees.minutes-seconds (d.mmss).</summary>
-    public void Dms() => Unary("dms (", ToDms);
+    public void Dms() => Unary("degree minute second (", ToDms);
 
     /// <summary>Converts d.mmss to decimal degrees.</summary>
-    public void Degrees() => Unary("degrees (", FromDms);
+    public void Degrees() => Unary("degrees(", FromDms);
+
+    public void Floor() => Unary("floor(", v => v.Floor());
+
+    public void Ceiling() => Unary("ceil(", v => v.Ceiling());
 
     /// <summary>A trigonometric key honouring the Inverse (2nd) and Hyperbolic toggles.</summary>
     public void Trig(TrigFunction function)
@@ -646,7 +666,7 @@ public sealed class ScientificCalculator
             }
         }
 
-        var rad = ToRadians(x);
+        var rad = ToRadians(AngleMode == AngleMode.Radians ? x : x - (((x / BigNum.FromInt(AngleMode == AngleMode.Degrees ? 360 : 400)).Floor()) * BigNum.FromInt(AngleMode == AngleMode.Degrees ? 360 : 400)));
         sin = BigNum.Sin(rad).Round(BigNum.Precision);
         cos = BigNum.Cos(rad).Round(BigNum.Precision);
         return Combine(f, sin, cos);
@@ -656,10 +676,10 @@ public sealed class ScientificCalculator
     {
         TrigFunction.Sin => sin,
         TrigFunction.Cos => cos,
-        TrigFunction.Tan => cos.IsZero ? throw new CalcFailure(DivideByZero) : sin / cos,
-        TrigFunction.Sec => cos.IsZero ? throw new CalcFailure(DivideByZero) : BigNum.One / cos,
+        TrigFunction.Tan => cos.IsZero ? throw new CalcFailure(Invalid) : sin / cos,
+        TrigFunction.Sec => cos.IsZero ? throw new CalcFailure(Invalid) : BigNum.One / cos,
         TrigFunction.Csc => sin.IsZero ? throw new CalcFailure(DivideByZero) : BigNum.One / sin,
-        _ => sin.IsZero ? throw new CalcFailure(DivideByZero) : cos / sin,
+        _ => sin.IsZero ? throw new CalcFailure(DivideByZero) : cos.IsZero ? throw new CalcFailure(Invalid) : cos / sin,
     };
 
     private BigNum InverseTrig(TrigFunction f, BigNum x)
@@ -745,7 +765,7 @@ public sealed class ScientificCalculator
             throw new CalcFailure(OverflowMessage);
         }
 
-        return BigNum.FromDouble(Gamma(v.ToDouble() + 1));
+        return BigNum.Gamma(v + BigNum.One);
     }
 
     // Lanczos approximation (g = 7, n = 9). Only used for non-integer factorials.
@@ -1071,7 +1091,6 @@ public sealed class ScientificCalculator
 
         _value = value.Round(BigNum.DisplayDigits);
         _operandText = null;
-        _shownOperandText = null;
         _typed = false;
         _entering = false;
         _afterOperator = false;
@@ -1184,7 +1203,7 @@ public sealed class ScientificCalculator
         ScientificOperator.Mod => "Mod",
         ScientificOperator.Power => "^",
         ScientificOperator.Root => "yroot",
-        _ => "logbase",
+        _ => "Log base",
     };
 
     /// <summary>
@@ -1199,9 +1218,14 @@ public sealed class ScientificCalculator
         }
 
         var r = value.Round(MaxDigits);
-        if (r.Magnitude < 0)
+        if (r.Magnitude < 0 && !scientific)
         {
-            r = r.RoundAtExponent(-MaxDigits);
+            // Small numbers keep at most 32 digits after the decimal point, unless they need exponent form.
+            var needed = r.Digits - r.Magnitude - 1;
+            if (r.Magnitude >= -3 || needed <= MaxDigits)
+            {
+                r = r.RoundAtExponent(-MaxDigits);
+            }
         }
 
         if (r.IsZero)

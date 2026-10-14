@@ -6,7 +6,23 @@ Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
 
 $script:Window = $null
 
+function Wait-Desktop([int]$TimeoutMinutes = 120) {
+    # UI Automation only works while the interactive session is connected and unlocked.
+    $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
+    while ((Get-Date) -lt $deadline) {
+        $state = (query user 2>$null | Select-String -Pattern "^\s*>?$env:USERNAME\s" | Select-Object -First 1)
+        if ($state -and $state.Line -match '\sActive\s' -and -not (Get-Process LogonUI -ErrorAction SilentlyContinue)) {
+            return
+        }
+
+        Start-Sleep -Seconds 10
+    }
+
+    throw 'Timed out waiting for an active desktop session'
+}
+
 function Start-Calc {
+    Wait-Desktop
     Get-Process CalculatorApp -ErrorAction SilentlyContinue | Stop-Process -Force
     Start-Process calc.exe
     $root = [Windows.Automation.AutomationElement]::RootElement

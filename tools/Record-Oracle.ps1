@@ -66,6 +66,15 @@ function Record-One([string]$seq) {
         $t = if ($e) { $e.Current.Name } else { '<missing>' }
         $t -replace $spec.strip[$i], ''
     }
+    # Undo persistent toggles so sequences stay independent.
+    foreach ($id in @($spec.untoggle)) {
+        if (-not $id) { continue }
+        $t = Find-Element $id
+        $pat = $null
+        if ($t -and $t.TryGetCurrentPattern([Windows.Automation.TogglePattern]::Pattern, [ref]$pat)) {
+            if ($pat.Current.ToggleState -eq 'On') { $pat.Toggle() }
+        }
+    }
     (@($seq) + @($cols)) -join "`t"
 }
 
