@@ -36,6 +36,13 @@ dotnet test
 dotnet run --project src/CalcSharp.App
 ```
 
+## Time spent
+
+Wall-clock time (UTC+11). Each session starts when the prompt is given with `implement @claude-prompt.md` and stops when control is handed back.
+
+| Session | Start | Stop | Elapsed | Notes |
+| --- | --- | --- | --- | --- |
+
 ## Ground rules
 
 No one else's `calc.exe` source code is read. Code decompiled from `calc.exe` by this project itself may be read. See [GLOSSARY.md](GLOSSARY.md) for the web addresses consulted and why.
