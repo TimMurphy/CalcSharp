@@ -93,7 +93,7 @@ public class ProgrammerCalculatorTests
         c.SetRadix(Radix.Hex);
         Assert.Equal("1A", c.Display);
         c.SetRadix(Radix.Bin);
-        Assert.Equal("1 1010", c.Display);
+        Assert.Equal("0001 1010", c.Display);
     }
 
     [Fact]
@@ -349,7 +349,7 @@ public class ProgrammerCalculatorTests
     {
         var c = Calc(size: WordSize.Dword);
         Run(c, "1", ProgrammerOp.Lsh, "32");
-        Assert.Equal(0, c.Value);
+        Assert.Equal("Result not defined", c.Display);
     }
 
     [Fact]
@@ -482,7 +482,7 @@ public class ProgrammerCalculatorTests
         c.Digit(3);
         c.Evaluate();
         Assert.Equal(3, c.Value);
-        Assert.Equal("", c.Expression);
+        Assert.Equal("3=", c.Expression);
     }
 
     [Fact]

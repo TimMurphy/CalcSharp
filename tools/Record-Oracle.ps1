@@ -50,7 +50,9 @@ function Get-Ui([string]$ElementId) {
 function Press([string[]]$ids) {
     foreach ($id in $ids) {
         # Elements inside flyouts only exist while open, so look them up each time.
-        Invoke-Element (Get-Ui $id)
+        $element = Get-Ui $id
+        # A disabled button simply ignores the press, as it would for a user.
+        if ($element.Current.IsEnabled) { Invoke-Element $element }
     }
 }
 
@@ -66,6 +68,13 @@ function Record-One([string]$seq) {
         $t = if ($e) { $e.Current.Name } else { '<missing>' }
         $t -replace $spec.strip[$i], ''
     }
+    # A key that cycles through N states (for example the word size) is pressed until it is back at the start.
+    if ($spec.cycle) {
+        $presses = ($seq.ToCharArray() | Where-Object { [string]$_ -eq $spec.cycle.key }).Count
+        $extra = ($spec.cycle.length - ($presses % $spec.cycle.length)) % $spec.cycle.length
+        for ($n = 0; $n -lt $extra; $n++) { Press $keys[[string]$spec.cycle.key] }
+    }
+
     # Undo persistent toggles so sequences stay independent.
     foreach ($id in @($spec.untoggle)) {
         if (-not $id) { continue }

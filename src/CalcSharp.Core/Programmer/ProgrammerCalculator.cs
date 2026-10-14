@@ -61,7 +61,13 @@ public sealed class ProgrammerCalculator
 
     private readonly List<long> _operands = [];
     private readonly List<Token> _stack = [];
-    private readonly List<string> _expression = [];
+    private readonly List<object> _expression = [];   // string (operator, parenthesis), long (number) or ExprNode
+
+    private abstract record ExprNode;
+
+    private sealed record NotNode(object Inner) : ExprNode;
+
+    private sealed record NegateNode(object Inner) : ExprNode;
 
     private long _current;
     private bool _entering = true;
@@ -74,6 +80,10 @@ public sealed class ProgrammerCalculator
     private long _lastOperand;
     private long _memory;
     private bool _hasMemory;
+    private object? _operandNode;        // expression node of the current operand when produced by NOT or negate
+    private object? _shownTail;          // what the expression line shows for the current operand
+    private List<object>? _finalExpr;    // expression after '=' (rendered with a trailing '=')
+    private bool _bareEquals;            // '=' was pressed with nothing to evaluate
 
     public WordSize WordSize { get; private set; } = WordSize.Qword;
 
@@ -95,15 +105,53 @@ public sealed class ProgrammerCalculator
 
     public int OpenParentheses => _stack.Count(t => t.IsParen);
 
-    public string Expression => string.Join(" ", _expression);
+    public string Expression => _finalExpr is not null
+        ? BuildExpression(_finalExpr, null) + "="
+        : BuildExpression(_expression, _shownTail);
+
+    private string BuildExpression(IEnumerable<object> tokens, object? tail)
+    {
+        var sb = new StringBuilder();
+        var previous = string.Empty;
+        foreach (var node in tokens.Concat(tail is null ? [] : [tail]))
+        {
+            var token = Render(node);
+            if (sb.Length > 0 && previous != "(" && token != ")")
+            {
+                sb.Append(' ');
+            }
+
+            sb.Append(token);
+            previous = token;
+        }
+
+        return sb.ToString();
+    }
+
+    private string Render(object node) => node switch
+    {
+        string text => text,
+        long value => PlainText(value),
+        NotNode not => $"NOT({Render(not.Inner)})",
+        NegateNode negate => $"negate({Render(negate.Inner)})",
+        _ => string.Empty,
+    };
+
+    /// <summary>The current value in the current radix, as used inside the expression line (no grouping).</summary>
+    private string PlainText(long v) => Radix switch
+    {
+        Radix.Dec => Wrap(v).ToString(CultureInfo.InvariantCulture),
+        Radix.Bin => Convert.ToString((long)Pattern(v), 2),
+        _ => Format(v, Radix),
+    };
 
     /// <summary>The value shown on the main display, in the current radix (or an error message).</summary>
     public string Display => _error ? _errorText : Format(_current, Radix);
 
-    public string Hex => Format(_current, Radix.Hex);
-    public string Dec => Format(_current, Radix.Dec);
-    public string Oct => Format(_current, Radix.Oct);
-    public string Bin => Format(_current, Radix.Bin);
+    public string Hex => _error ? string.Empty : Format(_current, Radix.Hex);
+    public string Dec => _error ? string.Empty : Format(_current, Radix.Dec);
+    public string Oct => _error ? string.Empty : Format(_current, Radix.Oct);
+    public string Bin => _error ? string.Empty : Format(_current, Radix.Bin);
 
     public long MaxValue => Bits == 64 ? long.MaxValue : (1L << (Bits - 1)) - 1;
     public long MinValue => Bits == 64 ? long.MinValue : -(1L << (Bits - 1));
@@ -138,6 +186,11 @@ public sealed class ProgrammerCalculator
                 return Convert.ToString((long)Pattern(v), 8);
             default:
                 var bin = Convert.ToString((long)Pattern(v), 2);
+                if (bin != "0" && bin.Length % 4 != 0)
+                {
+                    bin = bin.PadLeft(bin.Length + (4 - (bin.Length % 4)), '0');
+                }
+
                 var sb = new StringBuilder();
                 for (var i = 0; i < bin.Length; i++)
                 {
@@ -176,7 +229,15 @@ public sealed class ProgrammerCalculator
         _ => WordSize.Qword,
     });
 
-    public void SetRadix(Radix radix) => Radix = radix;
+    public void SetRadix(Radix radix)
+    {
+        if (radix != Radix && !_error)
+        {
+            _entering = false;
+        }
+
+        Radix = radix;
+    }
 
     public bool IsDigitEnabled(int digit) => digit >= 0 && digit < (int)Radix;
 
@@ -205,14 +266,25 @@ public sealed class ProgrammerCalculator
             {
                 _operands.Clear();
                 _stack.Clear();
-                _expression.Clear();
-                _lastOp = null;
+                if (!_bareEquals)
+                {
+                    _expression.Clear();
+                    _finalExpr = null;
+                    _shownTail = null;
+                }
+
                 _justEvaluated = false;
             }
 
             _current = 0;
             _entering = true;
             _afterOperator = false;
+        }
+
+        _operandNode = null;
+        if (_stack.Count > 0)
+        {
+            _shownTail = null;
         }
 
         if (Radix == Radix.Dec)
@@ -261,6 +333,12 @@ public sealed class ProgrammerCalculator
             return;
         }
 
+        if (!_entering)
+        {
+            var node = new NegateNode(_operandNode ?? _current);
+            _operandNode = _shownTail = node;
+        }
+
         _current = Wrap(unchecked(-_current));
     }
 
@@ -271,6 +349,16 @@ public sealed class ProgrammerCalculator
             return;
         }
 
+        if (_justEvaluated)
+        {
+            _operands.Clear();
+            _stack.Clear();
+            _expression.Clear();
+            _finalExpr = null;
+            _justEvaluated = false;
+        }
+
+        _operandNode = _shownTail = new NotNode(_operandNode ?? _current);
         _current = Wrap(~_current);
         _entering = false;
         _afterOperator = false;
@@ -284,6 +372,7 @@ public sealed class ProgrammerCalculator
         _entering = true;
         _afterOperator = false;
         _justEvaluated = false;
+        _operandNode = null;
     }
 
     public void Clear() => ResetAll();
@@ -302,6 +391,8 @@ public sealed class ProgrammerCalculator
         _lastOp = null;
         _lastOperand = 0;
         _carry = false;
+        _operandNode = _shownTail = _finalExpr = null;
+        _bareEquals = false;
     }
 
     // ---- bit-flip panel ------------------------------------------------------------------
@@ -339,14 +430,14 @@ public sealed class ProgrammerCalculator
         ProgrammerOp.Subtract => "−",
         ProgrammerOp.Multiply => "×",
         ProgrammerOp.Divide => "÷",
-        ProgrammerOp.Mod => "Mod",
+        ProgrammerOp.Mod => "%",
         ProgrammerOp.And => "AND",
         ProgrammerOp.Or => "OR",
         ProgrammerOp.Xor => "XOR",
         ProgrammerOp.Nand => "NAND",
         ProgrammerOp.Nor => "NOR",
-        ProgrammerOp.Lsh => "Lsh",
-        ProgrammerOp.Rsh => "Rsh",
+        ProgrammerOp.Lsh => "<<",
+        ProgrammerOp.Rsh => ">>",
         ProgrammerOp.RoL => "RoL",
         ProgrammerOp.RoR => "RoR",
         ProgrammerOp.RoLC => "RoLC",
@@ -373,16 +464,19 @@ public sealed class ProgrammerCalculator
             _operands.Clear();
             _stack.Clear();
             _expression.Clear();
+            _finalExpr = null;
             _justEvaluated = false;
         }
 
-        _expression.Add(Format(_current, Radix));
+        _expression.Add(_operandNode ?? _current);
+        _operandNode = _shownTail = null;
         _operands.Add(_current);
 
         while (_stack.Count > 0 && _stack[^1].Op is { } top && Precedence(top) >= Precedence(op))
         {
             if (!ReduceOne())
             {
+                _expression.Add(Symbol(op));
                 return;
             }
         }
@@ -406,6 +500,7 @@ public sealed class ProgrammerCalculator
             _operands.Clear();
             _stack.Clear();
             _expression.Clear();
+            _finalExpr = null;
             _justEvaluated = false;
         }
 
@@ -424,7 +519,8 @@ public sealed class ProgrammerCalculator
         }
 
         _operands.Add(_current);
-        _expression.Add(Format(_current, Radix));
+        _expression.Add(_operandNode ?? _current);
+        _operandNode = _shownTail = null;
         while (_stack[^1].Op is not null)
         {
             if (!ReduceOne())
@@ -452,23 +548,38 @@ public sealed class ProgrammerCalculator
         {
             if (_lastOp is { } op)
             {
-                var result = Apply(_current, op, _lastOperand, out var err);
+                var left = _current;
+                var result = Apply(left, op, _lastOperand, out var err);
                 if (err is not null)
                 {
+                    _expression.Clear();
+                    _expression.AddRange([left, Symbol(op)]);
                     SetError(err);
                     return;
                 }
 
+                _finalExpr = [left, Symbol(op), _lastOperand];
                 _current = result;
+                _bareEquals = false;
+            }
+            else
+            {
+                _finalExpr = [_operandNode ?? _current];
+                _bareEquals = true;
             }
 
+            _expression.Clear();
+            _operandNode = _shownTail = null;
             _entering = false;
             _afterOperator = false;
             _justEvaluated = true;
-            _expression.Clear();
             return;
         }
 
+        var right = _operandNode ?? _current;
+        _operandNode = _shownTail = null;
+        var mark = _expression.Count;
+        _expression.Add(right);
         _operands.Add(_current);
         while (_stack.Count > 0)
         {
@@ -480,13 +591,20 @@ public sealed class ProgrammerCalculator
 
             if (!ReduceOne(remember: true))
             {
+                if (_expression.Count > mark)
+                {
+                    _expression.RemoveRange(mark, _expression.Count - mark);
+                }
+
                 return;
             }
         }
 
         _current = _operands[^1];
         _operands.Clear();
+        _finalExpr = [.. _expression];
         _expression.Clear();
+        _bareEquals = false;
         _entering = false;
         _afterOperator = false;
         _justEvaluated = true;
@@ -522,7 +640,7 @@ public sealed class ProgrammerCalculator
         _errorText = text;
         _operands.Clear();
         _stack.Clear();
-        _expression.Clear();
+        _finalExpr = null;
         _lastOp = null;
         _afterOperator = false;
         _entering = false;
@@ -542,7 +660,7 @@ public sealed class ProgrammerCalculator
             case ProgrammerOp.Mod:
                 if (b == 0)
                 {
-                    error = a == 0 && op == ProgrammerOp.Divide ? Undefined : DivideByZero;
+                    error = op == ProgrammerOp.Mod || a == 0 ? Undefined : DivideByZero;
                     return 0;
                 }
 
@@ -567,13 +685,14 @@ public sealed class ProgrammerCalculator
             case ProgrammerOp.Rsh:
                 if (b < 0)
                 {
-                    error = Undefined;
+                    error = "Result not defined";
                     return 0;
                 }
 
                 if (b >= Bits)
                 {
-                    return op == ProgrammerOp.Rsh && a < 0 && ShiftMode != ShiftMode.Logical ? -1 : 0;
+                    error = "Result not defined";
+                    return 0;
                 }
 
                 if (op == ProgrammerOp.Lsh)

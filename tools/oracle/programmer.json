@@ -1,0 +1,31 @@
+{
+  "nav": "Programmer",
+  "reset": ["clearButton", "decimalButton", "bitShiftButton", "arithmeticShiftButton"],
+  "cycle": { "key": "w", "length": 4 },
+  "reads": ["CalculatorResults", "CalculatorExpression", "hexButton", "decimalButton", "octolButton", "binaryButton"],
+  "strip": ["^Display is ", "^Expression is ?", "^HexaDecimal ", "^Decimal ", "^Octal ", "^Binary "],
+  "keys": {
+    "0": ["num0Button"], "1": ["num1Button"], "2": ["num2Button"], "3": ["num3Button"], "4": ["num4Button"],
+    "5": ["num5Button"], "6": ["num6Button"], "7": ["num7Button"], "8": ["num8Button"], "9": ["num9Button"],
+    "A": ["aButton"], "B": ["bButton"], "C": ["cButton"], "D": ["dButton"], "E": ["eButton"], "F": ["fButton"],
+    "+": ["plusButton"], "-": ["minusButton"], "*": ["multiplyButton"], "/": ["divideButton"], "=": ["equalButton"],
+    "n": ["negateButton"], "<": ["backSpaceButton"], "x": ["clearButton"], "m": ["modButton"],
+    "(": ["openParenthesisButton"],
+    "&": ["bitwiseButton", "andButton"], "|": ["bitwiseButton", "orButton"], "~": ["bitwiseButton", "notButton"],
+    "@": ["bitwiseButton", "nandButton"], "#": ["bitwiseButton", "norButton"], "^": ["bitwiseButton", "xorButton"],
+    "l": ["lshButton"], "r": ["rshButton"],
+    "h": ["hexButton"], "j": ["decimalButton"], "o": ["octolButton"], "i": ["binaryButton"],
+    "w": ["qwordButton"], "u": ["memButton"],
+    "y": ["bitShiftButton", "arithmeticShiftButton"], "z": ["bitShiftButton", "logicalShiftButton"],
+    "k": ["bitShiftButton", "rotateCircularButton"], "p": ["bitShiftButton", "rotateCarryShiftButton"]
+  },
+  "alphabet": "0123456789012345678901234567890123456789+-*/=n<m&|~@#^lrhjoiABCDEF",
+  "probes": [
+    "5", "255", "255h", "255o", "255i", "hFF", "hFFj", "hABC", "j10h", "j10o", "j10i", "i101", "i102", "o789", "o17",
+    "5+3=", "5-8=", "5*3=", "7/2=", "7m3=", "5n", "5nn", "255+1=", "hFF+1=", "9223372036854775807+1=",
+    "9223372036854775807", "9223372036854775808", "99999999999999999999", "5&3=", "5|3=", "5^3=", "5~", "5@3=", "5#3=",
+    "1l", "1l3=", "8r1=", "8n", "16r2=", "1l63=", "1l64=", "1w", "255w", "256w", "255ww", "255www", "257wwww", "65536w",
+    "65536ww", "hFFw", "5w5+=", "5w", "255wwwj", "1y", "1z", "1k", "1p", "1zl3=", "1kl3=", "1pl3=", "8zr1=",
+    "5/0=", "0/0=", "5m0=", "5+3*2=", "5+3*2", "(5+3)*2=", "(5+3", "5+", "5+=", "5==", "5+3==", "9<", "99<<", "hF<", "5x", "5u", "hFFu"
+  ]
+}
