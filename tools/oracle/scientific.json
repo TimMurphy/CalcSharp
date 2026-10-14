@@ -1,0 +1,27 @@
+{
+  "nav": "Scientific",
+  "reset": ["clearButton"],
+  "reads": ["CalculatorResults", "CalculatorExpression"],
+  "strip": ["^Display is ", "^Expression is ?"],
+  "keys": {
+    "0": ["num0Button"], "1": ["num1Button"], "2": ["num2Button"], "3": ["num3Button"], "4": ["num4Button"],
+    "5": ["num5Button"], "6": ["num6Button"], "7": ["num7Button"], "8": ["num8Button"], "9": ["num9Button"],
+    ".": ["decimalSeparatorButton"], "+": ["plusButton"], "-": ["minusButton"], "*": ["multiplyButton"],
+    "/": ["divideButton"], "=": ["equalButton"], "n": ["negateButton"], "b": ["backSpaceButton"],
+    "c": ["clearButton"], "s": ["squareRootButton"], "q": ["xpower2Button"], "r": ["invertButton"],
+    "a": ["absButton"], "x": ["expButton"], "m": ["modButton"], "(": ["openParenthesisButton"],
+    ")": ["closeParenthesisButton"], "!": ["factorialButton"], "p": ["piButton"], "v": ["eulerButton"],
+    "^": ["powerButton"], "w": ["powerOf10Button"], "g": ["logBase10Button"], "l": ["logBaseEButton"],
+    "u": ["shiftButton"], "z": ["degButton"], "f": ["ftoeButton"],
+    "i": ["trigButton", "sinButton"], "o": ["trigButton", "cosButton"], "t": ["trigButton", "tanButton"],
+    "k": ["trigButton", "secButton"], "j": ["trigButton", "cscButton"], "y": ["trigButton", "cotButton"]
+  },
+  "alphabet": "0123456789012345678901234567890123456789.+-*/=nbcsqraxm()!pv^wglyiotkj",
+  "probes": [
+    "5+3=", "2+3*4=", "(2+3)*4=", "2^3=", "2^10=", "9s", "5!", "10!", "20!", "70!", "0!", "3.5!", "1/3=", "p", "v", "5pw",
+    "100g", "1000g", "2w", "5q", "5r", "5a", "5nn", "5na", "7m3=", "2^0.5=", "4s*4s=", "1+2+3*", "(1+2", "((1+2)",
+    "5+(3*2)=", "5+(", "5+()", "5)", "9999999999*9999999999=", "2^100=", "2^1000=", "1/0=", "0/0=", "0!", "5n!", "5x2=", "5x2",
+    "5i", "0i", "0o", "0t", "9t", "p/2i", 
+  ]
+}
+

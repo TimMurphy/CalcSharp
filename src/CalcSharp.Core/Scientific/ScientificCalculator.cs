@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Numerics;
 using System.Text;
 
 namespace CalcSharp.Core.Scientific;
@@ -37,28 +38,35 @@ public enum TrigFunction
 }
 
 /// <summary>
-/// State machine modelling the "Scientific" mode of a desktop calculator: expression entry with
+/// State machine modelling the "Scientific" mode of the Windows Calculator: expression entry with
 /// operator precedence and parentheses, scientific functions, angle modes and memory.
+/// Arithmetic is performed with <see cref="BigNum"/> (32 significant digits are displayed).
 /// </summary>
 public sealed class ScientificCalculator
 {
-    public const int MaxDigits = 16;
+    public const int MaxDigits = BigNum.DisplayDigits;
 
     private const string DivideByZero = "Cannot divide by zero";
     private const string Undefined = "Result is undefined";
     private const string Invalid = "Invalid input";
     private const string OverflowMessage = "Overflow";
+    private const int MaxExponent = 10000;
 
     private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
 
+    private sealed class CalcFailure(string message) : Exception(message);
+
     private readonly StringBuilder _entry = new("0");
     private readonly StringBuilder _expr = new();
-    private readonly Stack<double> _operands = new();
+    private readonly Stack<BigNum> _operands = new();
     private readonly Stack<ScientificOperator?> _ops = new();   // null = open parenthesis
     private readonly Stack<int> _parenStarts = new();
 
-    private double _value;               // the value currently shown (when not entering)
+    private BigNum _value;               // the value currently shown (when not entering)
     private string? _operandText;        // expression text of the current operand if it came from a function
+    private string? _shownOperandText;   // what the expression line shows for the operand
+    private bool _typed;                 // a number has been typed since the last operator or parenthesis
+    private bool _staleExpression;       // the expression is only kept for display after a bare '='
     private bool _operandInExpr;         // current operand is a closed "( ... )" group already in the expression
     private int _groupStart;
     private int _opTextLength;           // length of the last operator text appended to the expression
@@ -67,19 +75,18 @@ public sealed class ScientificCalculator
     private bool _justEvaluated;
     private bool _error;
     private ScientificOperator? _lastOp;
-    private double _lastRight;
-    private double _memory;
+    private BigNum _lastRight;
+    private BigNum _memory;
     private bool _hasMemory;
     private bool _fixedExponent;
-    private string? _failure;
 
     public string Display { get; private set; } = "0";
 
-    public string Expression => _expr.ToString().TrimEnd();
+    public string Expression => (_expr + (_shownOperandText ?? string.Empty)).TrimEnd();
 
     public bool HasMemory => _hasMemory;
 
-    public double MemoryValue => _memory;
+    public double MemoryValue => _memory.ToDouble();
 
     public bool IsError => _error;
 
@@ -186,9 +193,19 @@ public sealed class ScientificCalculator
     /// <summary>The "exp" key: begin the exponent of the number being entered.</summary>
     public void Exp()
     {
-        if (!BeginEntry() || _entry.ToString().Contains('e'))
+        if (_error)
+        {
+            Clear();
+        }
+
+        if (!_entering || _justEvaluated || _entry.ToString().Contains('e') || !BeginEntry())
         {
             return;
+        }
+
+        if (!_entry.ToString().Contains('.'))
+        {
+            _entry.Append('.');
         }
 
         _entry.Append("e+0");
@@ -233,7 +250,7 @@ public sealed class ScientificCalculator
             negative = false;
         }
 
-        _entry.Clear().Append(negative ? "-" : "").Append(body);
+        _entry.Clear().Append(negative ? "-" : string.Empty).Append(body);
         UpdateEntryDisplay();
     }
 
@@ -252,7 +269,7 @@ public sealed class ScientificCalculator
             {
                 _entry[e + 1] = _entry[e + 1] == '+' ? '-' : '+';
             }
-            else
+            else if (text != "0")
             {
                 _entry.Clear().Append(text.StartsWith('-') ? text[1..] : "-" + text);
             }
@@ -261,7 +278,7 @@ public sealed class ScientificCalculator
             return;
         }
 
-        Unary("negate", v => -v);
+        Unary("negate(", v => -v);
     }
 
     public void ClearEntry()
@@ -274,7 +291,7 @@ public sealed class ScientificCalculator
 
         _entry.Clear().Append('0');
         _entering = true;
-        _value = 0;
+        _value = BigNum.Zero;
         _operandText = null;
         if (_justEvaluated)
         {
@@ -289,9 +306,9 @@ public sealed class ScientificCalculator
     {
         _entry.Clear().Append('0');
         ResetExpression();
-        _value = 0;
+        _value = BigNum.Zero;
         _lastOp = null;
-        _lastRight = 0;
+        _lastRight = BigNum.Zero;
         _entering = true;
         _error = false;
         Display = "0";
@@ -306,6 +323,7 @@ public sealed class ScientificCalculator
             return;
         }
 
+        DropStale();
         if (_justEvaluated)
         {
             var v = _value;
@@ -333,6 +351,7 @@ public sealed class ScientificCalculator
         {
             if (!Reduce())
             {
+                _expr.Append(" " + Symbol(op) + " ");
                 return;
             }
         }
@@ -343,11 +362,12 @@ public sealed class ScientificCalculator
         Display = Format(_value, true, _fixedExponent);
         _afterOperator = true;
         _entering = false;
+        _typed = false;
     }
 
     private void AppendOperator(ScientificOperator op)
     {
-        var text = Symbol(op) + " ";
+        var text = " " + Symbol(op) + " ";
         _expr.Append(text);
         _opTextLength = text.Length;
     }
@@ -359,26 +379,58 @@ public sealed class ScientificCalculator
             return;
         }
 
-        if (_justEvaluated || _operandInExpr || (!_afterOperator && _ops.Count == 0 && _operands.Count == 0 && _expr.Length > 0))
+        DropStale();
+        if (_justEvaluated)
         {
             ResetExpression();
+            _entering = true;
+            _entry.Clear().Append('0');
+            _value = BigNum.Zero;
+            Display = "0";
+        }
+
+        if (!_afterOperator && (_typed || _operandText is not null || _operandInExpr))
+        {
+            // A number or group directly followed by "(" is an implicit multiplication.
+            Operator(ScientificOperator.Multiply);
+            if (_error)
+            {
+                return;
+            }
+        }
+        else
+        {
+            _entry.Clear().Append('0');
+            _entering = true;
+            _value = BigNum.Zero;
+            Display = "0";
         }
 
         _parenStarts.Push(_expr.Length);
-        _expr.Append("( ");
+        _expr.Append('(');
         _ops.Push(null);
-        _value = 0;
-        _entry.Clear().Append('0');
-        _entering = true;
-        _afterOperator = true;
+        _afterOperator = false;
+        _typed = false;
         _operandText = null;
-        Display = "0";
+        _shownOperandText = null;
     }
 
     public void CloseParenthesis()
     {
-        if (_error || _parenStarts.Count == 0)
+        if (_error)
         {
+            return;
+        }
+
+        if (_parenStarts.Count == 0)
+        {
+            if (_entering)
+            {
+                _value = CurrentValue();
+                _entering = false;
+                Display = Format(_value, true, _fixedExponent);
+            }
+
             return;
         }
 
@@ -393,7 +445,7 @@ public sealed class ScientificCalculator
 
         _ops.Pop();
         _groupStart = _parenStarts.Pop();
-        _expr.Append(") ");
+        _expr.Append(')');
         _value = _operands.Pop();
         Display = Format(_value, true, _fixedExponent);
         _entering = false;
@@ -406,21 +458,23 @@ public sealed class ScientificCalculator
     {
         if (_error)
         {
+            Clear();
             return;
         }
 
-        double result;
+        DropStale();
+        BigNum result;
         if (_justEvaluated || (_ops.Count == 0 && _operands.Count == 0 && !_operandInExpr))
         {
             var left = CurrentValue();
             if (_lastOp is not { } last)
             {
-                _expr.Clear().Append(_operandText ?? Format(left, false, false)).Append(" =");
+                _expr.Clear().Append(_operandText ?? Format(left, false, false)).Append('=');
                 _value = left;
                 Display = Format(left, true, _fixedExponent);
                 _entering = false;
-                _justEvaluated = true;
-                _operandText = null;
+                _staleExpression = true;
+                _operandText = _shownOperandText = null;
                 return;
             }
 
@@ -430,16 +484,18 @@ public sealed class ScientificCalculator
             }
 
             _expr.Clear().Append(Format(left, false, false)).Append(' ').Append(Symbol(last)).Append(' ')
-                .Append(Format(_lastRight, false, false)).Append(" =");
+                .Append(Format(_lastRight, false, false)).Append('=');
             Finish(result);
             return;
         }
 
+        var mark = _expr.Length;
         if (_afterOperator && _ops.Count > 0 && _ops.Peek() is not null)
         {
             // "5 +" then "=": the displayed value is the right operand.
             _operands.Push(_value);
-            _expr.Append(Format(_value, false, false)).Append(' ');
+            _expr.Append(Format(_value, false, false));
+            _shownOperandText = null;
         }
         else
         {
@@ -452,12 +508,13 @@ public sealed class ScientificCalculator
             {
                 _ops.Pop();
                 _parenStarts.Pop();
-                _expr.Append(") ");
+                _expr.Append(')');
                 continue;
             }
 
             if (!Reduce())
             {
+                _expr.Length = mark;
                 return;
             }
         }
@@ -467,11 +524,12 @@ public sealed class ScientificCalculator
         Finish(result);
     }
 
-    private void Finish(double result)
+    private void Finish(BigNum result)
     {
         _value = result;
         Display = Format(result, true, _fixedExponent);
         _entering = false;
+        _typed = false;
         _justEvaluated = true;
         _afterOperator = false;
         _operandInExpr = false;
@@ -483,196 +541,214 @@ public sealed class ScientificCalculator
 
     // ---- unary functions --------------------------------------------------
 
-    public void Square() => Unary("sqr", v => v * v);
+    public void Square() => Unary("square (", v => v * v);
 
-    public void Cube() => Unary("cube", v => v * v * v);
+    public void Cube() => Unary("cube (", v => v * v * v);
 
-    public void SquareRoot() => Unary("sqrt", v => v < 0 ? Fail(Invalid) : Math.Sqrt(v));
+    public void SquareRoot() => Unary("√(", v => v.Sign < 0 ? throw new CalcFailure(Invalid) : BigNum.Sqrt(v));
 
-    public void CubeRoot() => Unary("cuberoot", Math.Cbrt);
+    public void CubeRoot() => Unary("cuberoot (", CubeRootOf);
 
-    public void TenPower() => Unary("10^", v => Math.Pow(10, v));
+    public void TenPower() => Unary("10^(", v => BigNum.Pow(BigNum.Ten, v));
 
-    public void TwoPower() => Unary("2^", v => Math.Pow(2, v));
+    public void TwoPower() => Unary("2^(", v => BigNum.Pow(BigNum.Two, v));
 
-    public void EPower() => Unary("e^", Math.Exp);
+    public void EPower() => Unary("e^(", BigNum.Exp);
 
-    public void Log() => Unary("log", v => v <= 0 ? Fail(Invalid) : Math.Log10(v));
+    public void Log() => Unary("log(", v => v.Sign <= 0 ? throw new CalcFailure(Invalid) : BigNum.Log10(v));
 
-    public void Ln() => Unary("ln", v => v <= 0 ? Fail(Invalid) : Math.Log(v));
+    public void Ln() => Unary("natural log (", v => v.Sign <= 0 ? throw new CalcFailure(Invalid) : BigNum.Ln(v));
 
-    public void Abs() => Unary("abs", Math.Abs);
+    public void Abs() => Unary("Absolute value (", v => v.Abs());
 
-    public void Reciprocal() => Unary("1/", v => v == 0 ? Fail(DivideByZero) : 1 / v);
+    public void Reciprocal() => Unary("1/(", v => v.IsZero ? throw new CalcFailure(DivideByZero) : BigNum.One / v);
 
-    public void Factorial() => Unary("fact", FactorialOf);
+    public void Factorial() => Unary("factorial (", FactorialOf);
 
-    public void Pi() => Constant("π", Math.PI);
+    public void Pi() => Constant(BigNum.Pi);
 
-    public void E() => Constant("e", Math.E);
+    public void E() => Constant(BigNum.Exp(BigNum.One));
 
     /// <summary>Converts decimal degrees to degrees.minutes-seconds (d.mmss).</summary>
-    public void Dms() => Unary("dms", ToDms);
+    public void Dms() => Unary("dms (", ToDms);
 
     /// <summary>Converts d.mmss to decimal degrees.</summary>
-    public void Degrees() => Unary("deg", FromDms);
+    public void Degrees() => Unary("degrees (", FromDms);
 
     /// <summary>A trigonometric key honouring the Inverse (2nd) and Hyperbolic toggles.</summary>
     public void Trig(TrigFunction function)
     {
-        var name = function.ToString().ToLowerInvariant();
-        if (Inverse)
+        var baseName = function switch
         {
-            name = "a" + name;
-        }
-
-        if (Hyperbolic)
-        {
-            name += "h";
-        }
+            TrigFunction.Sin => "sine",
+            TrigFunction.Cos => "cosine",
+            TrigFunction.Tan => "tangent",
+            TrigFunction.Sec => "secant",
+            TrigFunction.Csc => "cosecant",
+            _ => "cotangent",
+        };
 
         var inverse = Inverse;
         var hyperbolic = Hyperbolic;
-        Unary(name, v => hyperbolic
+        var name = (inverse ? "inverse " : string.Empty) + (hyperbolic ? "hyperbolic " : string.Empty) + baseName;
+        if (!hyperbolic)
+        {
+            name += AngleMode switch
+            {
+                AngleMode.Degrees => " degrees",
+                AngleMode.Radians => " radians",
+                _ => " gradians",
+            };
+        }
+
+        Unary(name + " (", v => hyperbolic
             ? (inverse ? InverseHyperbolic(function, v) : HyperbolicOf(function, v))
             : (inverse ? InverseTrig(function, v) : TrigOf(function, v)));
     }
 
-    private double TrigOf(TrigFunction f, double x)
+    private BigNum ToRadians(BigNum x) => AngleMode switch
     {
-        var full = AngleMode switch { AngleMode.Degrees => 360.0, AngleMode.Gradians => 400.0, _ => 2 * Math.PI };
-        var half = full / 2;
-        var quarter = full / 4;
-        var a = x % full;
-        if (a < 0)
-        {
-            a += full;
-        }
+        AngleMode.Degrees => x * BigNum.Pi / BigNum.FromInt(180),
+        AngleMode.Gradians => x * BigNum.Pi / BigNum.FromInt(200),
+        _ => x,
+    };
 
-        var exact = AngleMode != AngleMode.Radians;
-        var rad = AngleMode switch
-        {
-            AngleMode.Degrees => x * Math.PI / 180,
-            AngleMode.Gradians => x * Math.PI / 200,
-            _ => x,
-        };
+    private BigNum FromRadians(BigNum x) => AngleMode switch
+    {
+        AngleMode.Degrees => x * BigNum.FromInt(180) / BigNum.Pi,
+        AngleMode.Gradians => x * BigNum.FromInt(200) / BigNum.Pi,
+        _ => x,
+    };
 
-        var sin = RoundSig(Math.Sin(rad), 15);
-        var cos = RoundSig(Math.Cos(rad), 15);
-        if (exact)
+    private BigNum TrigOf(TrigFunction f, BigNum x)
+    {
+        BigNum sin;
+        BigNum cos;
+
+        if (AngleMode != AngleMode.Radians)
         {
-            if (a % half == 0)
+            var full = BigNum.FromInt(AngleMode == AngleMode.Degrees ? 360 : 400);
+            var quarter = full / BigNum.FromInt(4);
+            var turns = (x / full).Floor();
+            var a = x - (turns * full);   // 0 <= a < full
+            if ((a / quarter).IsInteger)
             {
-                sin = 0;
-                cos = a == 0 ? 1 : -1;
+                var q = (int)(a / quarter).ToDouble();
+                (sin, cos) = q switch
+                {
+                    0 => (BigNum.Zero, BigNum.One),
+                    1 => (BigNum.One, BigNum.Zero),
+                    2 => (BigNum.Zero, -BigNum.One),
+                    _ => (-BigNum.One, BigNum.Zero),
+                };
+
+                return Combine(f, sin, cos);
             }
-            else if (a % half == quarter)
-            {
-                cos = 0;
-                sin = a == quarter ? 1 : -1;
-            }
-        }
-        else
-        {
-            if (Math.Abs(sin) < 1e-15) sin = 0;
-            if (Math.Abs(cos) < 1e-15) cos = 0;
         }
 
-        return f switch
-        {
-            TrigFunction.Sin => sin,
-            TrigFunction.Cos => cos,
-            TrigFunction.Tan => cos == 0 ? Fail(DivideByZero) : sin / cos,
-            TrigFunction.Sec => cos == 0 ? Fail(DivideByZero) : 1 / cos,
-            TrigFunction.Csc => sin == 0 ? Fail(DivideByZero) : 1 / sin,
-            _ => sin == 0 ? Fail(DivideByZero) : cos / sin,
-        };
+        var rad = ToRadians(x);
+        sin = BigNum.Sin(rad).Round(BigNum.Precision);
+        cos = BigNum.Cos(rad).Round(BigNum.Precision);
+        return Combine(f, sin, cos);
     }
 
-    private double InverseTrig(TrigFunction f, double x)
+    private static BigNum Combine(TrigFunction f, BigNum sin, BigNum cos) => f switch
     {
-        double rad;
+        TrigFunction.Sin => sin,
+        TrigFunction.Cos => cos,
+        TrigFunction.Tan => cos.IsZero ? throw new CalcFailure(DivideByZero) : sin / cos,
+        TrigFunction.Sec => cos.IsZero ? throw new CalcFailure(DivideByZero) : BigNum.One / cos,
+        TrigFunction.Csc => sin.IsZero ? throw new CalcFailure(DivideByZero) : BigNum.One / sin,
+        _ => sin.IsZero ? throw new CalcFailure(DivideByZero) : cos / sin,
+    };
+
+    private BigNum InverseTrig(TrigFunction f, BigNum x)
+    {
+        var half = BigNum.Pi / BigNum.Two;
+        BigNum rad;
         switch (f)
         {
             case TrigFunction.Sin:
-                if (Math.Abs(x) > 1) return Fail(Invalid);
-                rad = Math.Asin(x);
+                rad = x.Abs() > BigNum.One ? throw new CalcFailure(Invalid) : BigNum.Asin(x);
                 break;
             case TrigFunction.Cos:
-                if (Math.Abs(x) > 1) return Fail(Invalid);
-                rad = Math.Acos(x);
+                rad = x.Abs() > BigNum.One ? throw new CalcFailure(Invalid) : BigNum.Acos(x);
                 break;
             case TrigFunction.Tan:
-                rad = Math.Atan(x);
+                rad = BigNum.Atan(x);
                 break;
             case TrigFunction.Sec:
-                if (Math.Abs(x) < 1) return Fail(Invalid);
-                rad = Math.Acos(1 / x);
+                rad = x.Abs() < BigNum.One ? throw new CalcFailure(Invalid) : BigNum.Acos(BigNum.One / x);
                 break;
             case TrigFunction.Csc:
-                if (Math.Abs(x) < 1) return Fail(Invalid);
-                rad = Math.Asin(1 / x);
+                rad = x.Abs() < BigNum.One ? throw new CalcFailure(Invalid) : BigNum.Asin(BigNum.One / x);
                 break;
             default:
-                rad = x == 0 ? Math.PI / 2 : Math.Atan(1 / x);
+                rad = x.IsZero ? half : BigNum.Atan(BigNum.One / x);
                 break;
         }
 
-        return AngleMode switch
-        {
-            AngleMode.Degrees => Math.Round(rad * 180 / Math.PI, 13, MidpointRounding.AwayFromZero),
-            AngleMode.Gradians => Math.Round(rad * 200 / Math.PI, 13, MidpointRounding.AwayFromZero),
-            _ => rad,
-        };
+        return FromRadians(rad).Round(BigNum.Precision);
     }
 
-    private double HyperbolicOf(TrigFunction f, double x) => f switch
+    private static BigNum HyperbolicOf(TrigFunction f, BigNum x) => f switch
     {
-        TrigFunction.Sin => Math.Sinh(x),
-        TrigFunction.Cos => Math.Cosh(x),
-        TrigFunction.Tan => Math.Tanh(x),
-        TrigFunction.Sec => 1 / Math.Cosh(x),
-        TrigFunction.Csc => x == 0 ? Fail(DivideByZero) : 1 / Math.Sinh(x),
-        _ => x == 0 ? Fail(DivideByZero) : 1 / Math.Tanh(x),
+        TrigFunction.Sin => BigNum.Sinh(x),
+        TrigFunction.Cos => BigNum.Cosh(x),
+        TrigFunction.Tan => BigNum.Tanh(x),
+        TrigFunction.Sec => BigNum.One / BigNum.Cosh(x),
+        TrigFunction.Csc => x.IsZero ? throw new CalcFailure(DivideByZero) : BigNum.One / BigNum.Sinh(x),
+        _ => x.IsZero ? throw new CalcFailure(DivideByZero) : BigNum.One / BigNum.Tanh(x),
     };
 
-    private double InverseHyperbolic(TrigFunction f, double x) => f switch
+    private static BigNum InverseHyperbolic(TrigFunction f, BigNum x) => f switch
     {
-        TrigFunction.Sin => Math.Asinh(x),
-        TrigFunction.Cos => x < 1 ? Fail(Invalid) : Math.Acosh(x),
-        TrigFunction.Tan => Math.Abs(x) >= 1 ? Fail(Invalid) : Math.Atanh(x),
-        TrigFunction.Sec => x <= 0 || x > 1 ? Fail(Invalid) : Math.Acosh(1 / x),
-        TrigFunction.Csc => x == 0 ? Fail(Invalid) : Math.Asinh(1 / x),
-        _ => Math.Abs(x) <= 1 ? Fail(Invalid) : Math.Atanh(1 / x),
+        TrigFunction.Sin => BigNum.Asinh(x),
+        TrigFunction.Cos => x < BigNum.One ? throw new CalcFailure(Invalid) : BigNum.Acosh(x),
+        TrigFunction.Tan => x.Abs() >= BigNum.One ? throw new CalcFailure(Invalid) : BigNum.Atanh(x),
+        TrigFunction.Sec => x.Sign <= 0 || x > BigNum.One ? throw new CalcFailure(Invalid) : BigNum.Acosh(BigNum.One / x),
+        TrigFunction.Csc => x.IsZero ? throw new CalcFailure(Invalid) : BigNum.Asinh(BigNum.One / x),
+        _ => x.Abs() <= BigNum.One ? throw new CalcFailure(Invalid) : BigNum.Atanh(BigNum.One / x),
     };
 
-    private double FactorialOf(double v)
+    private static BigNum CubeRootOf(BigNum v)
     {
-        if (v < 0)
+        if (v.IsZero)
         {
-            return Fail(Invalid);
+            return BigNum.Zero;
         }
 
-        if (v == Math.Floor(v))
-        {
-            if (v > 170)
-            {
-                return Fail(OverflowMessage);
-            }
-
-            double r = 1;
-            for (var i = 2; i <= (int)v; i++)
-            {
-                r *= i;
-            }
-
-            return r;
-        }
-
-        return v > 170.5 ? Fail(OverflowMessage) : RoundSig(Gamma(v + 1), 15);
+        var root = BigNum.Exp(BigNum.Ln(v.Abs()) / BigNum.FromInt(3));
+        var rounded = root.Round(BigNum.DisplayDigits + 4);
+        return v.Sign < 0 ? -rounded : rounded;
     }
 
-    // Lanczos approximation (g = 7, n = 9).
+    private static BigNum FactorialOf(BigNum v)
+    {
+        if (v.Sign < 0)
+        {
+            throw new CalcFailure(Invalid);
+        }
+
+        if (v.IsInteger)
+        {
+            if (v > BigNum.FromInt(3248))
+            {
+                throw new CalcFailure(OverflowMessage);
+            }
+
+            return BigNum.Factorial((long)v.ToDouble());
+        }
+
+        if (v > BigNum.FromInt(3248))
+        {
+            throw new CalcFailure(OverflowMessage);
+        }
+
+        return BigNum.FromDouble(Gamma(v.ToDouble() + 1));
+    }
+
+    // Lanczos approximation (g = 7, n = 9). Only used for non-integer factorials.
     private static double Gamma(double z)
     {
         double[] c =
@@ -692,35 +768,35 @@ public sealed class ScientificCalculator
         return Math.Sqrt(2 * Math.PI) * Math.Pow(t, z + 0.5) * Math.Exp(-t) * x;
     }
 
-    private static double ToDms(double v)
+    private static BigNum ToDms(BigNum v)
     {
-        var d = (decimal)Math.Round(v, 12);
-        var sign = d < 0 ? -1m : 1m;
-        d = Math.Abs(d);
-        var deg = Math.Floor(d);
-        var rem = Math.Round((d - deg) * 60m, 10);
-        var min = Math.Floor(rem);
-        var sec = Math.Round((rem - min) * 60m, 8);
-        return (double)(sign * (deg + min / 100m + sec / 10000m));
+        var sign = v.Sign < 0 ? -1 : 1;
+        var d = v.Abs();
+        var deg = d.Truncate();
+        var rem = (d - deg) * BigNum.FromInt(60);
+        var min = rem.Truncate();
+        var sec = (rem - min) * BigNum.FromInt(60);
+        var r = deg + (min / BigNum.FromInt(100)) + (sec / BigNum.FromInt(10000));
+        return sign < 0 ? -r : r;
     }
 
-    private static double FromDms(double v)
+    private static BigNum FromDms(BigNum v)
     {
-        var d = (decimal)Math.Round(v, 12);
-        var sign = d < 0 ? -1m : 1m;
-        d = Math.Abs(d);
-        var deg = Math.Floor(d);
-        var frac = Math.Round((d - deg) * 100m, 10);
-        var min = Math.Floor(frac);
-        var sec = Math.Round((frac - min) * 100m, 8);
-        return (double)(sign * (deg + min / 60m + sec / 3600m));
+        var sign = v.Sign < 0 ? -1 : 1;
+        var d = v.Abs();
+        var deg = d.Truncate();
+        var frac = (d - deg) * BigNum.FromInt(100);
+        var min = frac.Truncate();
+        var sec = (frac - min) * BigNum.FromInt(100);
+        var r = deg + (min / BigNum.FromInt(60)) + (sec / BigNum.FromInt(3600));
+        return sign < 0 ? -r : r;
     }
 
     // ---- memory -----------------------------------------------------------
 
     public void MemoryClear()
     {
-        _memory = 0;
+        _memory = BigNum.Zero;
         _hasMemory = false;
     }
 
@@ -731,7 +807,7 @@ public sealed class ScientificCalculator
             return;
         }
 
-        Constant(Format(_memory, false, false), _memory);
+        Constant(_memory);
     }
 
     public void MemoryStore()
@@ -756,7 +832,7 @@ public sealed class ScientificCalculator
         }
 
         var v = CurrentValue();
-        _memory = Round16(_memory + v);
+        _memory += v;
         _value = v;
         _hasMemory = true;
         _entering = false;
@@ -770,7 +846,7 @@ public sealed class ScientificCalculator
         }
 
         var v = CurrentValue();
-        _memory = Round16(_memory - v);
+        _memory -= v;
         _value = v;
         _hasMemory = true;
         _entering = false;
@@ -778,40 +854,50 @@ public sealed class ScientificCalculator
 
     // ---- internals --------------------------------------------------------
 
-    // Marks the calculation as failed; the surrounding operation aborts in Check().
-    private double Fail(string message)
+    private void ShowError(string message)
     {
-        _failure ??= message;
-        return 0;
+        Display = message;
+        _error = true;
+        _entering = false;
+        _ops.Clear();
+        _operands.Clear();
+        _parenStarts.Clear();
+        _afterOperator = _justEvaluated = _operandInExpr = false;
     }
 
-    private bool Check(double result, out double clean)
+    private bool Guarded(Func<BigNum> compute, out BigNum result)
     {
-        clean = 0;
-        if (_failure is null)
+        result = BigNum.Zero;
+        try
         {
-            if (double.IsNaN(result))
+            var raw = compute();
+            if (!raw.IsZero && raw.Magnitude >= MaxExponent)
             {
-                _failure = Invalid;
+                ShowError(OverflowMessage);
+                return false;
             }
-            else if (double.IsInfinity(result))
-            {
-                _failure = OverflowMessage;
-            }
+
+            result = raw.Round(BigNum.Precision);
+            return true;
+        }
+        catch (CalcFailure f)
+        {
+            ShowError(f.Message);
+        }
+        catch (DivideByZeroException)
+        {
+            ShowError(DivideByZero);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            ShowError(Invalid);
+        }
+        catch (OverflowException)
+        {
+            ShowError(OverflowMessage);
         }
 
-        if (_failure is not null)
-        {
-            Display = _failure;
-            _failure = null;
-            _error = true;
-            _entering = false;
-            ResetExpression();
-            return false;
-        }
-
-        clean = Round16(result);
-        return true;
+        return false;
     }
 
     private void ResetExpression()
@@ -822,6 +908,19 @@ public sealed class ScientificCalculator
         _parenStarts.Clear();
         _afterOperator = _justEvaluated = _operandInExpr = false;
         _operandText = null;
+        _shownOperandText = null;
+        _staleExpression = false;
+        _typed = false;
+    }
+
+    private void DropStale()
+    {
+        if (_staleExpression)
+        {
+            _expr.Clear();
+            _staleExpression = false;
+            _shownOperandText = null;
+        }
     }
 
     private bool BeginEntry()
@@ -850,10 +949,16 @@ public sealed class ScientificCalculator
 
         _afterOperator = false;
         _operandText = null;
+        _typed = true;
+        if (_ops.Count > 0)
+        {
+            _shownOperandText = null;
+        }
+
         return true;
     }
 
-    private double CurrentValue()
+    private BigNum CurrentValue()
     {
         if (!_entering)
         {
@@ -861,7 +966,7 @@ public sealed class ScientificCalculator
         }
 
         var text = _entry.ToString().Replace(".e", "e").TrimEnd('.');
-        return double.Parse(text, NumberStyles.Float, Inv);
+        return BigNum.Parse(text);
     }
 
     private void UpdateEntryDisplay()
@@ -869,13 +974,13 @@ public sealed class ScientificCalculator
         var text = _entry.ToString();
         var e = text.IndexOf('e');
         var mant = e < 0 ? text : text[..e];
-        var exp = e < 0 ? "" : text[e..];
+        var exp = e < 0 ? string.Empty : text[e..];
         var negative = mant.StartsWith('-');
         var body = negative ? mant[1..] : mant;
         var dot = body.IndexOf('.');
         var intPart = dot < 0 ? body : body[..dot];
-        var grouped = decimal.Parse(intPart, Inv).ToString("#,##0", Inv);
-        var shown = (negative ? "-" : "") + grouped + (dot < 0 ? (exp.Length > 0 ? "." : "") : body[dot..]);
+        var grouped = BigInteger.Parse(intPart, Inv).ToString("#,##0", Inv);
+        var shown = (negative ? "-" : string.Empty) + grouped + (dot < 0 ? string.Empty : body[dot..]);
         Display = shown + exp;
         _value = CurrentValue();
     }
@@ -892,19 +997,21 @@ public sealed class ScientificCalculator
 
         var v = CurrentValue();
         _operands.Push(v);
-        _expr.Append(_operandText ?? Format(v, false, false)).Append(' ');
+        _expr.Append(_operandText ?? Format(v, false, false));
         _operandText = null;
+        _shownOperandText = null;
         _entering = false;
         _value = v;
     }
 
-    private void Unary(string name, Func<double, double> f)
+    private void Unary(string name, Func<BigNum, BigNum> f)
     {
         if (_error)
         {
             return;
         }
 
+        DropStale();
         if (_justEvaluated)
         {
             var v0 = _value;
@@ -914,37 +1021,44 @@ public sealed class ScientificCalculator
         }
 
         var v = CurrentValue();
-        if (!Check(f(v), out var clean))
-        {
-            return;
-        }
-
         string inner;
         if (_operandInExpr)
         {
             inner = _expr.ToString(_groupStart, _expr.Length - _groupStart).Trim();
-            _expr.Length = _groupStart;
-            _operandInExpr = false;
         }
         else
         {
             inner = _operandText ?? Format(v, false, false);
         }
 
-        _operandText = $"{name}({inner})";
+        if (!Guarded(() => f(v), out var clean))
+        {
+            _shownOperandText = name + inner + ")";
+            return;
+        }
+
+        if (_operandInExpr)
+        {
+            _expr.Length = _groupStart;
+            _operandInExpr = false;
+        }
+
+        _operandText = _shownOperandText = name + inner + ")";
         _value = clean;
         _entering = false;
         _afterOperator = false;
+        _typed = false;
         Display = Format(clean, true, _fixedExponent);
     }
 
-    private void Constant(string text, double value)
+    private void Constant(BigNum value)
     {
         if (_error)
         {
             return;
         }
 
+        DropStale();
         if (_justEvaluated)
         {
             ResetExpression();
@@ -955,8 +1069,10 @@ public sealed class ScientificCalculator
             return;
         }
 
-        _value = Round16(value);
-        _operandText = text;
+        _value = value.Round(BigNum.DisplayDigits);
+        _operandText = null;
+        _shownOperandText = null;
+        _typed = false;
         _entering = false;
         _afterOperator = false;
         Display = Format(_value, true, _fixedExponent);
@@ -978,60 +1094,78 @@ public sealed class ScientificCalculator
         return true;
     }
 
-    private bool Binary(ScientificOperator op, double l, double r, out double result)
+    private bool Binary(ScientificOperator op, BigNum l, BigNum r, out BigNum result) =>
+        Guarded(
+            () => op switch
+            {
+                ScientificOperator.Add => l + r,
+                ScientificOperator.Subtract => l - r,
+                ScientificOperator.Multiply => l * r,
+                ScientificOperator.Divide => r.IsZero
+                    ? throw new CalcFailure(l.IsZero ? Undefined : DivideByZero)
+                    : l / r,
+                ScientificOperator.Mod => r.IsZero
+                    ? throw new CalcFailure(DivideByZero)
+                    : l - (r * (l / r).Truncate()),
+                ScientificOperator.Power => PowerOf(l, r),
+                ScientificOperator.Root => RootOf(l, r),
+                _ => l.Sign <= 0 || r.Sign <= 0 || r == BigNum.One
+                    ? throw new CalcFailure(Invalid)
+                    : BigNum.Ln(l) / BigNum.Ln(r),
+            },
+            out result);
+
+    private static BigNum PowerOf(BigNum l, BigNum r)
     {
-        double raw;
-        switch (op)
+        if (l.IsZero && r.IsZero)
         {
-            case ScientificOperator.Add: raw = l + r; break;
-            case ScientificOperator.Subtract: raw = l - r; break;
-            case ScientificOperator.Multiply: raw = l * r; break;
-            case ScientificOperator.Divide:
-                raw = r == 0 ? Fail(l == 0 ? Undefined : DivideByZero) : l / r;
-                break;
-            case ScientificOperator.Mod:
-                raw = r == 0 ? Fail(DivideByZero) : l % r;
-                break;
-            case ScientificOperator.Power:
-                if (l == 0 && r == 0)
-                {
-                    raw = Fail(Undefined);
-                }
-                else if (l == 0 && r < 0)
-                {
-                    raw = Fail(DivideByZero);
-                }
-                else if (l < 0 && r != Math.Floor(r))
-                {
-                    raw = Fail(Invalid);
-                }
-                else
-                {
-                    raw = Math.Pow(l, r);
-                }
-
-                break;
-            case ScientificOperator.Root:
-                if (r == 0)
-                {
-                    raw = Fail(l == 0 ? Undefined : DivideByZero);
-                }
-                else if (l < 0)
-                {
-                    raw = r == Math.Floor(r) && Math.Abs(r % 2) == 1 ? -Math.Pow(-l, 1 / r) : Fail(Invalid);
-                }
-                else
-                {
-                    raw = Math.Pow(l, 1 / r);
-                }
-
-                break;
-            default: // LogBase
-                raw = l <= 0 || r <= 0 || r == 1 ? Fail(Invalid) : Math.Log(l) / Math.Log(r);
-                break;
+            throw new CalcFailure(Undefined);
         }
 
-        return Check(raw, out result);
+        if (l.IsZero && r.Sign < 0)
+        {
+            throw new CalcFailure(DivideByZero);
+        }
+
+        if (l.Sign < 0 && !r.IsInteger)
+        {
+            throw new CalcFailure(Invalid);
+        }
+
+        if (r.IsInteger && r.Magnitude <= 6)
+        {
+            return BigNum.Pow(l, r);
+        }
+
+        if (l.Sign < 0)
+        {
+            var even = ((BigInteger)r.Truncate().Mantissa * BigInteger.Pow(10, Math.Max(0, r.Exponent))).IsEven;
+            var mag = BigNum.Pow(l.Abs(), r);
+            return even ? mag : -mag;
+        }
+
+        return BigNum.Pow(l, r);
+    }
+
+    private static BigNum RootOf(BigNum l, BigNum r)
+    {
+        if (r.IsZero)
+        {
+            throw new CalcFailure(l.IsZero ? Undefined : DivideByZero);
+        }
+
+        if (l.Sign < 0)
+        {
+            var oddInteger = r.IsInteger && !((BigInteger)r.Truncate().Mantissa * BigInteger.Pow(10, Math.Max(0, r.Exponent))).IsEven;
+            if (!oddInteger)
+            {
+                throw new CalcFailure(Invalid);
+            }
+
+            return -BigNum.Pow(-l, BigNum.One / r);
+        }
+
+        return BigNum.Pow(l, BigNum.One / r);
     }
 
     private static int Precedence(ScientificOperator op) => op switch
@@ -1053,67 +1187,86 @@ public sealed class ScientificCalculator
         _ => "logbase",
     };
 
-    private static double RoundSig(double v, int digits)
+    /// <summary>
+    /// Formats a value like the real calculator: up to 32 significant digits, grouping, and
+    /// exponent notation (for example "1.e+5533") when the value does not fit.
+    /// </summary>
+    public static string Format(BigNum value, bool group, bool scientific)
     {
-        if (v == 0 || double.IsNaN(v) || double.IsInfinity(v))
-        {
-            return v;
-        }
-
-        return double.Parse(v.ToString("E" + (digits - 1), Inv), NumberStyles.Float, Inv);
-    }
-
-    private static double Round16(double v)
-    {
-        if (v == 0 || double.IsNaN(v) || double.IsInfinity(v))
-        {
-            return v;
-        }
-
-        return double.Parse(v.ToString("E15", Inv), NumberStyles.Float, Inv);
-    }
-
-    /// <summary>Formats a value as the real calculator would: 16 significant digits, grouping, e-notation.</summary>
-    public static string Format(double value, bool group, bool scientific)
-    {
-        if (value == 0)
+        if (value.IsZero)
         {
             return scientific ? "0.e+0" : "0";
         }
 
-        var s = Math.Abs(value).ToString("E15", Inv);
-        var ei = s.IndexOf('E');
-        var exp = int.Parse(s[(ei + 1)..], Inv);
-        var digits = (s[0] + s[2..ei]).TrimEnd('0');
-        if (digits.Length == 0)
+        var r = value.Round(MaxDigits);
+        if (r.Magnitude < 0)
         {
-            digits = "0";
+            r = r.RoundAtExponent(-MaxDigits);
         }
 
-        var sign = value < 0 ? "-" : "";
-        if (scientific || exp >= 16 || exp < -6)
+        if (r.IsZero)
         {
-            var mant = digits.Length > 1 ? digits[0] + "." + digits[1..] : digits + (scientific ? "." : "");
-            return sign + mant + "e" + (exp < 0 ? "-" : "+") + Math.Abs(exp).ToString(Inv);
+            return scientific ? "0.e+0" : "0";
         }
 
-        string intDigits, frac;
-        if (exp >= 0)
+        var negative = r.Sign < 0;
+        var a = r.Abs();
+        var exp = a.Magnitude;
+        var digits = BigInteger.Abs(a.Mantissa).ToString(Inv);   // trailing zeros already trimmed
+
+        bool useScientific;
+        if (scientific)
         {
-            intDigits = digits.Length > exp + 1 ? digits[..(exp + 1)] : digits.PadRight(exp + 1, '0');
-            frac = digits.Length > exp + 1 ? digits[(exp + 1)..] : "";
+            useScientific = true;
+        }
+        else if (exp >= MaxDigits)
+        {
+            useScientific = true;
+        }
+        else if (exp >= -3)
+        {
+            useScientific = false;
         }
         else
         {
-            intDigits = "0";
-            frac = new string('0', -exp - 1) + digits;
+            var decimals = digits.Length - exp - 1;
+            useScientific = decimals > MaxDigits;
         }
 
-        if (group)
+        string text;
+        if (useScientific)
         {
-            intDigits = decimal.Parse(intDigits, Inv).ToString("#,##0", Inv);
+            var mantissa = digits.Length > 1 ? digits[0] + "." + digits[1..] : digits + ".";
+            text = mantissa + "e" + (exp < 0 ? "-" : "+") + Math.Abs(exp).ToString(Inv);
+        }
+        else
+        {
+            string intDigits;
+            string frac;
+            if (exp >= 0)
+            {
+                intDigits = digits.Length > exp + 1 ? digits[..(exp + 1)] : digits.PadRight(exp + 1, '0');
+                frac = digits.Length > exp + 1 ? digits[(exp + 1)..] : string.Empty;
+            }
+            else
+            {
+                intDigits = "0";
+                frac = new string('0', -exp - 1) + digits;
+            }
+
+            if (frac.Length > MaxDigits)
+            {
+                frac = frac[..MaxDigits].TrimEnd('0');
+            }
+
+            if (group)
+            {
+                intDigits = BigInteger.Parse(intDigits, Inv).ToString("#,##0", Inv);
+            }
+
+            text = intDigits + (frac.Length == 0 ? string.Empty : "." + frac);
         }
 
-        return sign + intDigits + (frac.Length == 0 ? "" : "." + frac);
+        return (negative ? "-" : string.Empty) + text;
     }
 }
