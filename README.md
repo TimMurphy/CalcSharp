@@ -10,25 +10,32 @@ Dave's Garage video https://youtu.be/KC31K-CUC5Y?si=ZCpKs0jT3eQy3FkL. I have del
 
 ## Features
 
-All modes in the navigation menu are implemented. **None has yet been verified as exact** against
-the real app; see "Not yet exact" below.
+All modes in the navigation menu are implemented. Behaviour is verified against the real Calculator
+by replaying recorded key sequences (see "How exactness is checked"); modes marked *unverified* have
+not been compared yet.
 
 | Mode | Status |
 | --- | --- |
-| Standard | Complete keypad, memory, expression line, errors, keyboard shortcuts |
-| Scientific | Precedence, parentheses, trig/hyp/inverse, DEG/RAD/GRAD, F-E, logs, powers, factorial |
-| Graphing | `y=`, `x=` and implicit equations, colour-coded list, zoom and pan |
-| Programmer | HEX/DEC/OCT/BIN, QWORD..BYTE, bitwise ops, shifts and rotates, bit-flip panel |
-| Date calculation | Difference between dates, add or subtract years/months/days |
-| Converters | Currency (offline rates), Volume, Length, Weight and mass, Temperature, Energy, Area, Speed, Time, Power, Data, Pressure, Angle |
+| Standard | Verified: display and expression line match 1,300+ recorded sequences, including memory keys |
+| Scientific | Verified on 158 recorded sequences; 32-digit arithmetic. Not yet verified: toggles (2nd, hyp, DEG/RAD/GRAD, F-E), inverse/hyperbolic names, number-format thresholds |
+| Graphing | *Unverified*: `y=`, `x=` and implicit equations, colour-coded list, zoom and pan |
+| Programmer | *Unverified*: HEX/DEC/OCT/BIN, QWORD..BYTE, bitwise ops, shifts and rotates, bit-flip panel |
+| Date calculation | *Unverified*: difference between dates, add or subtract years/months/days |
+| Converters | *Unverified*: Currency (offline rates), Volume, Length, Weight and mass, Temperature, Energy, Area, Speed, Time, Power, Data, Pressure, Angle |
+
+### How exactness is checked
+
+`tools/CalcOracle.psm1` and `tools/Record-Oracle.ps1` drive the installed Windows Calculator through
+UI Automation, press a key sequence from a map in `tools/oracle/`, and record the display and
+expression line to `tests/CalcSharp.Core.Tests/GoldenData/*.tsv`. The golden tests replay each
+sequence against the C# engine. This needs an interactive (unlocked, connected) desktop session.
 
 ### Not yet exact
 
 - Layout and visuals are approximate (no Mica/Fluent styling; some combo boxes are not dark themed).
-- Scientific uses `double` rounded to 16 digits, not the real app's arbitrary precision.
+- Programmer, Date calculation, Graphing and the converters have not been compared with the real app.
 - Converter unit order, "fun" units and rounding, and Currency rates, are best recollection.
 - Graphing has no tracing, analysis, settings or share.
-- Some shortcuts and edge-case behaviour were written from memory rather than extracted.
 - Single memory slot; no history or memory list pane.
 
 ## Requirements
@@ -55,8 +62,8 @@ Wall-clock time (UTC+11). Each session starts when the prompt is given with `imp
 
 | Session | Start | Stop | Elapsed | Notes |
 | --- | --- | --- | --- | --- |
-| 2 | 2026-10-14 17:54 | 2026-10-14 18:06 | 12m | Navigation shell, parallel build of Scientific, Programmer, Graphing, Date calculation and converters; merged; 394 tests |
-| | | | **12m** | **Total** (session 1 predates the clock rule and is not counted) |
+| 2 | 2026-10-14 17:54 | 2026-10-14 18:53 | 59m | Navigation shell; parallel build of all modes; UI Automation oracle; Standard matched to real app (1,300+ sequences); Scientific rewritten on 32-digit BigNum and matched (158 sequences) |
+| | | | **59m** | **Total** (session 1 predates the clock rule and is not counted) |
 
 ## Ground rules
 
