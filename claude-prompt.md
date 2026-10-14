@@ -16,7 +16,8 @@ Your job is to create an **exact working replica** of Windows' Calculator in C#.
 ## Rules
 
 - You may use the internet, but you **MUST NOT** read anyone else's source code related to `calc.exe`.
-- You **MAY** decompile `calc.exe` yourself and read the code you decompiled.
+- You **MAY** decompile or disassemble `calc.exe` (and its resources) yourself and read the output. `calc.exe` is a native app, so disassembly, strings and resource inspection are expected and approved: do not stop to ask which approach to use.
+- Use whatever you extract yourself (layout, strings, constants, behaviour) to make the replica exact, and keep going until the definition of done is met.
 - You **MUST** record every web address you read, and the reason for reading it, in `GLOSSARY.md`.
 - Do not copy any existing prompt or implementation of this task.
 
