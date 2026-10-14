@@ -16,6 +16,9 @@ Allowed by the brief: these are read from the locally installed Windows Calculat
 | `C:\Program Files\WindowsApps\Microsoft.WindowsCalculator_11.2607.0.0_x64__8wekyb3d8bbwe\resources.pri` | Extracted UI strings (error messages, tooltips with keyboard shortcuts, unit names, graphing and date-mode strings) and control names, to match the real app's wording, shortcuts and button sets. Copied to a scratch folder and dumped with a small string extractor. |
 | `...\AppxManifest.xml` | Copied alongside `resources.pri`; not otherwise used. |
 
+The running `calc.exe` is also driven through UI Automation (`tools/CalcOracle.psm1`) and its
+on-screen display and expression text are recorded as golden test data. No source code is read.
+
 Nothing from `CalculatorApp.dll`, `CalcViewModel.dll`, `GraphControl.dll` or `GraphingImpl.dll`
 has been disassembled yet.
 
